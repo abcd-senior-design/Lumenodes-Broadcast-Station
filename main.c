@@ -67,6 +67,12 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
+// @BLAKE I added these 2 header files to use the new NRFX stuff instead of the legacy things
+#include "nrf_pwm.h"
+#include "nrfx_pwm.h"
+// Kinda cheesy, just threw in NRF delay for my little demo
+#include "nrf_delay.h"
+
 
 #define CENTRAL_SCANNING_LED            BSP_BOARD_LED_3                     /**< Scanning LED will be on when the device is scanning. */
 #define CENTRAL_CONNECTED_LED           BSP_BOARD_LED_1                     /**< Connected LED will be on when the device is connected. */
@@ -125,6 +131,52 @@ static ble_gap_conn_params_t const m_connection_param =
     (uint16_t)SLAVE_LATENCY,
     (uint16_t)SUPERVISION_TIMEOUT
 };
+
+
+// @BLAKE just set up the PWM to work with the new NRFX stuff
+// instead of the legacy nrf_drv stuff.  Woot
+static uint16_t const counter_top = 10000;
+static nrfx_pwm_t m_pwm0 = NRFX_PWM_INSTANCE(0); // Use PWM 0
+
+static nrf_pwm_values_common_t sequence_values;
+
+static nrf_pwm_sequence_t const m_seq =
+{
+    .values.p_common    = &sequence_values,
+    .length              = NRF_PWM_VALUES_LENGTH(sequence_values),
+    .repeats             = 0,
+    .end_delay           = 0
+};
+
+static void pwm_init(void)
+{
+    uint32_t ret_code;
+    nrfx_pwm_config_t const config_the_pwm =
+    {
+        .output_pins =
+        {
+            BSP_LED_0 | NRFX_PWM_PIN_INVERTED, // channel 0
+            NRFX_PWM_PIN_NOT_USED, // channel 1
+            NRFX_PWM_PIN_NOT_USED, // channel 2
+            NRFX_PWM_PIN_NOT_USED  // channel 3
+        },
+        .irq_priority = APP_IRQ_PRIORITY_LOW,
+        .base_clock   = NRF_PWM_CLK_1MHz,
+        .count_mode   = NRF_PWM_MODE_UP,
+        .top_value    = counter_top,
+        .load_mode    = NRF_PWM_LOAD_COMMON,
+        .step_mode    = NRF_PWM_STEP_AUTO
+    };
+    ret_code = nrfx_pwm_init(&m_pwm0, &config_the_pwm, NULL);
+    APP_ERROR_CHECK(ret_code);
+}
+
+void set_pwm_dootie_psykle(int16_t duty_cycle)
+{
+    // Super simple, lols--just sets the duty cycle and calls it a day
+    sequence_values = duty_cycle;
+    nrfx_pwm_simple_playback(&m_pwm0, &m_seq, 1, 0);
+}
 
 
 /**@brief Function to handle asserts in the SoftDevice.
@@ -530,6 +582,7 @@ static void create_timers()
 
 int main(void)
 {
+    int i;
     // Initialize.
     log_init();
     timer_init();
@@ -542,6 +595,9 @@ int main(void)
     db_discovery_init();
     lbs_c_init();
 
+    pwm_init();
+    
+
     // Start execution.
     NRF_LOG_INFO("Blinky CENTRAL example started.");
     scan_start();
@@ -550,8 +606,12 @@ int main(void)
     bsp_board_led_on(CENTRAL_SCANNING_LED);
 
     // Enter main loop.
-    for (;;)
+    for (i=0;;i++)
     {
         idle_state_handle();
+
+        // @BLAKE Here's the world's cheesiest PWM demo
+        set_pwm_dootie_psykle((i*500)%10000);
+        nrf_delay_ms(100);
     }
 }
