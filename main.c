@@ -93,6 +93,15 @@
 #define APP_BLE_CONN_CFG_TAG            1                                   /**< A tag identifying the SoftDevice BLE configuration. */
 #define APP_BLE_OBSERVER_PRIO           3                                   /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 
+#define PERIOD 255
+#define DELAY 2000
+#define SMOOTH_DELAY 50
+#define RESOLUTION 5
+
+#define RED_PIN NRF_GPIO_PIN_MAP(0,20)
+#define GREEN_PIN NRF_GPIO_PIN_MAP(0,22)
+#define BLUE_PIN NRF_GPIO_PIN_MAP(0,24)
+
 
 BLE_LBS_C_DEF(m_ble_lbs_c);                                     /**< Main structure used by the LBS client module. */
 NRF_BLE_GATT_DEF(m_gatt);                                       /**< GATT module instance. */
@@ -135,48 +144,265 @@ static ble_gap_conn_params_t const m_connection_param =
 
 // @BLAKE just set up the PWM to work with the new NRFX stuff
 // instead of the legacy nrf_drv stuff.  Woot
-static uint16_t const counter_top = 10000;
-static nrfx_pwm_t m_pwm0 = NRFX_PWM_INSTANCE(0); // Use PWM 0
+//static uint16_t const counter_top = 10000;
 
-static nrf_pwm_values_common_t sequence_values;
+static nrfx_pwm_t RGB_PWM = NRFX_PWM_INSTANCE(0); // Use PWM 0
+//static nrfx_pwm_t Green_PWM = NRFX_PWM_INSTANCE(1); // Use PWM 1
+//static nrfx_pwm_t Blue_PWM = NRFX_PWM_INSTANCE(2); // Use PWM 2
 
-static nrf_pwm_sequence_t const m_seq =
+//static nrf_pwm_values_common_t Red_Seq;
+//static nrf_pwm_values_common_t Green_Seq;
+//static nrf_pwm_values_common_t Blue_Seq;
+
+static nrf_pwm_values_individual_t seq_values[] = {255, 255, 255, 255};
+
+static nrf_pwm_sequence_t const m_RGB_seq =
 {
-    .values.p_common    = &sequence_values,
-    .length              = NRF_PWM_VALUES_LENGTH(sequence_values),
+    .values.p_individual    = seq_values,
+    .length              = NRF_PWM_VALUES_LENGTH(seq_values),
     .repeats             = 0,
     .end_delay           = 0
 };
 
-static void pwm_init(void)
+//static nrf_pwm_sequence_t const m_green_seq =
+//{
+//    .values.p_common    = &Green_Seq,
+//    .length              = NRF_PWM_VALUES_LENGTH(&Green_Seq),
+//    .repeats             = 0,
+//    .end_delay           = 0
+//};
+//
+//static nrf_pwm_sequence_t const m_blue_seq =
+//{
+//    .values.p_common    = &Blue_Seq,
+//    .length              = NRF_PWM_VALUES_LENGTH(&Blue_Seq),
+//    .repeats             = 0,
+//    .end_delay           = 0
+//};
+
+static void pwm_init()
 {
     uint32_t ret_code;
-    nrfx_pwm_config_t const config_the_pwm =
+//    nrfx_pwm_config_t const config_R_pwm =
+//    {
+//        .output_pins =
+//        {
+//            RED_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
+//            NRFX_PWM_PIN_NOT_USED, // channel 1
+//            NRFX_PWM_PIN_NOT_USED, // channel 2
+//            NRFX_PWM_PIN_NOT_USED  // channel 3
+//        },
+//        .irq_priority = APP_IRQ_PRIORITY_LOW,
+//        .base_clock   = NRF_PWM_CLK_1MHz,
+//        .count_mode   = NRF_PWM_MODE_UP,
+//        .top_value    = PERIOD,
+//        .load_mode    = NRF_PWM_LOAD_COMMON,
+//        .step_mode    = NRF_PWM_STEP_AUTO
+//    };
+
+    nrfx_pwm_config_t const config_RGB_pwm =
     {
         .output_pins =
         {
-            BSP_LED_0 | NRFX_PWM_PIN_INVERTED, // channel 0
-            NRFX_PWM_PIN_NOT_USED, // channel 1
-            NRFX_PWM_PIN_NOT_USED, // channel 2
+            RED_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
+            GREEN_PIN | NRFX_PWM_PIN_INVERTED, // channel 1
+            BLUE_PIN | NRFX_PWM_PIN_INVERTED, // channel 2
             NRFX_PWM_PIN_NOT_USED  // channel 3
         },
-        .irq_priority = APP_IRQ_PRIORITY_LOW,
-        .base_clock   = NRF_PWM_CLK_1MHz,
+        .irq_priority = APP_IRQ_PRIORITY_HIGH,
+        .base_clock   = NRF_PWM_CLK_2MHz,
         .count_mode   = NRF_PWM_MODE_UP,
-        .top_value    = counter_top,
-        .load_mode    = NRF_PWM_LOAD_COMMON,
+        .top_value    = PERIOD,
+        .load_mode    = NRF_PWM_LOAD_INDIVIDUAL,
         .step_mode    = NRF_PWM_STEP_AUTO
     };
-    ret_code = nrfx_pwm_init(&m_pwm0, &config_the_pwm, NULL);
+
+
+
+//    nrfx_pwm_config_t const config_B_pwm =
+//    {
+//        .output_pins =
+//        {
+//            
+//            NRFX_PWM_PIN_NOT_USED, // channel 1
+//            NRFX_PWM_PIN_NOT_USED, // channel 2
+//            BLUE_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
+//            NRFX_PWM_PIN_NOT_USED  // channel 3
+//        },
+//        .irq_priority = APP_IRQ_PRIORITY_LOW,
+//        .base_clock   = NRF_PWM_CLK_1MHz,
+//        .count_mode   = NRF_PWM_MODE_UP,
+//        .top_value    = PERIOD,
+//        .load_mode    = NRF_PWM_LOAD_COMMON,
+//        .step_mode    = NRF_PWM_STEP_AUTO
+//    };
+//
+//            nrfx_pwm_config_t const config_G_pwm =
+//    {
+//        .output_pins =
+//        {
+//            
+//            NRFX_PWM_PIN_NOT_USED, // channel 1
+//            GREEN_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
+//            NRFX_PWM_PIN_NOT_USED, // channel 2
+//            NRFX_PWM_PIN_NOT_USED  // channel 3
+//        },
+//        .irq_priority = APP_IRQ_PRIORITY_LOW,
+//        .base_clock   = NRF_PWM_CLK_1MHz,
+//        .count_mode   = NRF_PWM_MODE_UP,
+//        .top_value    = PERIOD,
+//        .load_mode    = NRF_PWM_LOAD_COMMON,
+//        .step_mode    = NRF_PWM_STEP_AUTO
+//    };
+
+    ret_code = nrfx_pwm_init(&RGB_PWM, &config_RGB_pwm, NULL);
     APP_ERROR_CHECK(ret_code);
+
+//    ret_code = nrfx_pwm_init(&Green_PWM, &config_G_pwm, NULL);
+//    APP_ERROR_CHECK(ret_code);
+//
+//    ret_code = nrfx_pwm_init(&Blue_PWM, &config_B_pwm, NULL);
+//    APP_ERROR_CHECK(ret_code);
 }
 
-void set_pwm_dootie_psykle(int16_t duty_cycle)
+void Color_Change(uint16_t R, uint16_t G, uint16_t B){
+
+//    Red_Seq = (uint16_t) (R * 10);
+//    Green_Seq =(uint16_t) (G * 10);
+//    Blue_Seq =(uint16_t) (B * 10);
+//    
+
+    if(R > PERIOD){
+      seq_values->channel_0 = 0;
+
+    } else {
+      seq_values->channel_0 = PERIOD - R;
+    }
+    if(G > PERIOD){
+      seq_values->channel_1 = 0;
+    } else {
+      seq_values->channel_1 = PERIOD - G;
+    }
+    if(B > PERIOD){
+      seq_values->channel_2 = 0;
+    } else {
+      seq_values->channel_2 = PERIOD - B;
+    }
+
+    nrfx_pwm_simple_playback(&RGB_PWM, &m_RGB_seq, 1, NRFX_PWM_FLAG_LOOP);
+//    nrfx_pwm_simple_playback(&Green_PWM, &m_green_seq, 1, 0);
+//    nrfx_pwm_simple_playback(&Blue_PWM, &m_blue_seq, 1, 0);
+
+}
+
+void Rainbow_Smooth(){
+
+  int Red,Green,Blue;
+  //Green Up Cycle on Red
+  for (Green = 0; Green < PERIOD; Green += RESOLUTION){
+    
+    Color_Change(PERIOD, Green, 0);
+    nrf_delay_ms(SMOOTH_DELAY);
+
+  }
+
+  //Red Down Cycle on Green
+  for (Red = PERIOD; Red > 0; Red -= RESOLUTION){
+    
+    Color_Change(Red, PERIOD, 0);
+    nrf_delay_ms(SMOOTH_DELAY);
+
+  }
+  //Blue Up Cycle on Green
+  for (Blue = 0; Blue < PERIOD; Blue += RESOLUTION){
+    
+    Color_Change(0, PERIOD, Blue);
+    nrf_delay_ms(SMOOTH_DELAY);
+
+  }
+
+    //Green Down Cycle on Blue
+  for (Green = PERIOD; Green > 0; Green -= RESOLUTION){
+    
+    Color_Change(0, Green, PERIOD);
+    nrf_delay_ms(SMOOTH_DELAY);
+
+  }
+  //Red Up Cycle on Blue
+  for (Red = 0; Red < PERIOD; Red += RESOLUTION){
+    
+    Color_Change(Red, 0, PERIOD);
+    nrf_delay_ms(SMOOTH_DELAY);
+
+  }
+
+  //Blue Down Cycle on Red
+  for (Blue = PERIOD; Blue > 0; Blue -= RESOLUTION){
+    
+    Color_Change(PERIOD, 0, Blue);
+    nrf_delay_ms(SMOOTH_DELAY);
+
+  }
+}
+
+void Rainbow_Rough(){
+
+  //RED
+  Color_Change(100, 0, 0);
+  nrf_delay_ms(DELAY);
+
+  //ORANGE
+  Color_Change(100, 50, 0);
+  nrf_delay_ms(DELAY);
+
+  //YELLOW
+  Color_Change(100, 100, 0);
+  nrf_delay_ms(DELAY);
+
+  //Soft-GREEN
+  Color_Change(50, 100, 0);
+  nrf_delay_ms(DELAY);
+
+  //GREEN
+  Color_Change(0, 100, 0);
+  nrf_delay_ms(DELAY);
+
+  //Turquoise
+  Color_Change(0, 100, 50);
+  nrf_delay_ms(DELAY);
+
+  //Cyan
+  Color_Change(0, 100, 100);
+  nrf_delay_ms(DELAY);
+
+  //Soft-Blue????
+  Color_Change(0, 50, 100);
+  nrf_delay_ms(DELAY);
+
+  //BLUE
+  Color_Change(0, 0, 100);
+  nrf_delay_ms(DELAY);
+
+  //Deep Purple
+  Color_Change(50, 0, 100);
+  nrf_delay_ms(DELAY);
+
+  //Purple
+  Color_Change(0, 255, 255);
+  nrf_delay_ms(DELAY);
+
+  //Magenta
+  Color_Change(100, 0, 50);
+  nrf_delay_ms(DELAY);
+
+}
+
+/*void set_pwm_dootie_psykle(int16_t duty_cycle)
 {
     // Super simple, lols--just sets the duty cycle and calls it a day
     sequence_values = duty_cycle;
     nrfx_pwm_simple_playback(&m_pwm0, &m_seq, 1, 0);
-}
+}*/
 
 
 /**@brief Function to handle asserts in the SoftDevice.
@@ -279,10 +505,14 @@ static void on_adv_report(ble_gap_evt_adv_report_t const * p_adv_report)
 //    if (ble_advdata_short_name_find(p_adv_report->data.p_data, p_adv_report->data.len, m_target_periph_name, 4))
     {
         NRF_LOG_INFO("found LMND");
-        NRF_LOG_INFO("yay, value is: %s", ble_advdata_parse(p_adv_report->data.p_data,
-                              p_adv_report->data.len, BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA)+2);
+        char * message = ble_advdata_parse(p_adv_report->data.p_data,
+                              p_adv_report->data.len, BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA)+2;
+        NRF_LOG_INFO("yay, value is: %s", message);
         err_code = app_timer_start(m_singleshot_timer_id, APP_TIMER_TICKS(500), NULL);
         APP_ERROR_CHECK(err_code);
+
+
+        Color_Change(message[0],message[1],message[2]);
         // Name is a match, initiate connection.
 //        err_code = sd_ble_gap_connect(&p_adv_report->peer_addr,
 //                                      &m_scan_params,
@@ -583,6 +813,8 @@ static void create_timers()
 int main(void)
 {
     int i;
+
+    //Color_Change(0, 0, 0);
     // Initialize.
     log_init();
     timer_init();
@@ -594,9 +826,10 @@ int main(void)
     gatt_init();
     db_discovery_init();
     lbs_c_init();
-
     pwm_init();
-    
+    Color_Change(100, 100, 100);
+    nrf_delay_ms(1000);
+    //Color_Change(255, 0, 255);
 
     // Start execution.
     NRF_LOG_INFO("Blinky CENTRAL example started.");
@@ -609,9 +842,10 @@ int main(void)
     for (i=0;;i++)
     {
         idle_state_handle();
+        //Rainbow_Smooth();
 
         // @BLAKE Here's the world's cheesiest PWM demo
-        set_pwm_dootie_psykle((i*500)%10000);
-        nrf_delay_ms(100);
+        //set_pwm_dootie_psykle((i*500)%10000);
+        //nrf_delay_ms(100);
     }
 }
