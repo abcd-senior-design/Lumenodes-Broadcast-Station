@@ -496,7 +496,8 @@ static void on_adv_report(ble_gap_evt_adv_report_t const * p_adv_report)
         APP_ERROR_CHECK(err_code);
 
 
-        Color_Change(message[0],message[1],message[2]);
+        //Color_Change(message[0],message[1],message[2]);
+        Packet_Handle(message);
         // Name is a match, initiate connection.
 //        err_code = sd_ble_gap_connect(&p_adv_report->peer_addr,
 //                                      &m_scan_params,
@@ -1056,10 +1057,10 @@ void System_Init(){
     leds_init();
     buttons_init();
     power_management_init();
-    //ble_stack_init();
-    //gatt_init();
-    //db_discovery_init();
-    //lbs_c_init();
+    ble_stack_init();
+    gatt_init();
+    db_discovery_init();
+    lbs_c_init();
     pwm_init();
     if(fds_test_init() != NRF_SUCCESS){
       NRF_LOG_INFO("Failed to INIT");
@@ -1115,17 +1116,19 @@ int main(void)
     int i;
     System_Init();
     // Start execution.
-    scan_start();
+    
 
     //If fails to load the show, use a blank one.
     if(fds_read() == -1){
       clear_show();
       Color_Change(255,0,0);
+      NRF_LOG_INFO("Failed to retrieve show");
     } else{
-        Color_Change(0,0,0);
+        Color_Change(0,255,0);
+        NRF_LOG_INFO("Retrieved show!");
     }
 
-
+    scan_start();
 
 
     // Turn on the LED to signal scanning.
