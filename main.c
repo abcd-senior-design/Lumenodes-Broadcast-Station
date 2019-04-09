@@ -88,9 +88,11 @@
 #define SMOOTH_DELAY 50
 #define RESOLUTION 5
 
-#define RED_PIN NRF_GPIO_PIN_MAP(0,20)
-#define GREEN_PIN NRF_GPIO_PIN_MAP(0,22)
+#define RED_PIN NRF_GPIO_PIN_MAP(0,22)
+#define GREEN_PIN NRF_GPIO_PIN_MAP(0,20)
 #define BLUE_PIN NRF_GPIO_PIN_MAP(0,24)
+
+
 
 
 #define CENTRAL_SCANNING_LED            BSP_BOARD_LED_3                     /**< Scanning LED will be on when the device is scanning. */
@@ -141,10 +143,15 @@ APP_TIMER_DEF(m_singleshot_timer_id);
 #define FLASH_ADDR_START 0x3e000
 #define FLASH_ADDR_END 0x3e400
 
+#define FUEL_GAUGE_PIN NRF_GPIO_PIN_MAP(1,13)
+
 /* Defined in cli.c 
 extern void cli_init(void);
 extern void cli_start(void);
 extern void cli_process(void); */
+
+uint8_t PACK_ID[3];   //if PACKID = D0590F then PACKID[0] = D0 etc.
+char Show_Num[2] = {0xFF,0xFF};
 
 struct Set {
    unsigned char R;
@@ -154,8 +161,12 @@ struct Set {
 
 struct Show {
    struct Set sets[SHOW_SIZE];
+   //uint32 pack_id;
    //unsigned char num_sets;
 } Show;
+
+char prev_message[7];
+
 
 
 struct Show current_show;
@@ -182,6 +193,13 @@ static void my_fds_evt_handler(fds_evt_t const * const p_fds_evt)
     }
 }
 
+static bool fds_is_existed_record(fds_record_desc_t * record_desc, uint16_t key)
+{
+	fds_find_token_t    ftok ={0};
+	
+	return (fds_record_find(FILE_ID, key, record_desc, &ftok) == FDS_SUCCESS);
+}
+
 
 static ret_code_t fds_test_write(const struct Show Wr_Show)
 {
@@ -194,19 +212,46 @@ static ret_code_t fds_test_write(const struct Show Wr_Show)
 		record.file_id              = FILE_ID;
 		record.key              		= REC_KEY;
 		record.data.p_data       = &Wr_Show;
-		record.data.length_words   = sizeof(Wr_Show)/4 + 1;
-                NRF_LOG_INFO("Saving Integer");
+		record.data.length_words   = sizeof(Wr_Show) / sizeof(uint32_t) ;
+                NRF_LOG_INFO("Saving Structure (size: %d)",record.data.length_words);
                 //NRF_LOG_INFO("Size of Show: %d",sizeof(Wr_Show)/4 + 1);
 
                 ret_code_t rc;
-                rc = fds_record_write(&record_desc, &record);
+                if(fds_is_existed_record(&record_desc, REC_KEY)){
+                      rc = fds_record_update(&record_desc, &record);
+                      fds_gc();
+                } else{
+                      rc = fds_record_write(&record_desc, &record);
+                      fds_gc();
+                }
+
+                
                 if (rc != FDS_SUCCESS)
                 {
                     /* Handle error. */
-                    NRF_LOG_INFO("ERROR IN FDS WRITE");
+                    NRF_LOG_INFO("ERROR IN FDS WRITE: %d",rc);
+       
+                    if(rc == FDS_ERR_NO_SPACE_IN_FLASH) {
+                        NRF_LOG_INFO("NO SPACE IN FLASH");
+                        fds_gc();
+                        
+                        if(fds_is_existed_record(&record_desc, REC_KEY)){
+                              NRF_LOG_INFO("Update Flash");
+                              rc = fds_record_update(&record_desc, &record);
+                        } else{
+                              NRF_LOG_INFO("Write Flash");
+                              rc = fds_record_write(&record_desc, &record);
+                        }
+
+                        if(rc == FDS_SUCCESS){
+                            NRF_LOG_INFO("FIXED!!!");
+                        } else {
+                            NRF_LOG_INFO("NOT FIXED!!!: %d",rc);
+                        }
+                    }
                 }
 				
-		 NRF_LOG_INFO("Writing Record ID = %d \r\n",record_desc.record_id);
+		NRF_LOG_INFO("Writing Record ID = %d \r\n",record_desc.record_id);
 		return NRF_SUCCESS;
 }
 
@@ -488,10 +533,10 @@ static void on_adv_report(ble_gap_evt_adv_report_t const * p_adv_report)
                               m_target_periph_name))
 //    if (ble_advdata_short_name_find(p_adv_report->data.p_data, p_adv_report->data.len, m_target_periph_name, 4))
     {
-        NRF_LOG_INFO("found LMND");
+        //NRF_LOG_INFO("found LMND");
         char * message = ble_advdata_parse(p_adv_report->data.p_data,
                               p_adv_report->data.len, BLE_GAP_AD_TYPE_MANUFACTURER_SPECIFIC_DATA)+2;
-        NRF_LOG_INFO("yay, value is: %s", message);
+        //NRF_LOG_INFO("yay, value is: %s", message);
         err_code = app_timer_start(m_singleshot_timer_id, APP_TIMER_TICKS(500), NULL);
         APP_ERROR_CHECK(err_code);
 
@@ -800,6 +845,7 @@ static void create_timers()
 //static uint16_t const counter_top = 10000;
 
 static nrfx_pwm_t RGB_PWM = NRFX_PWM_INSTANCE(0); // Use PWM 0
+static nrfx_pwm_t FUEL_PWM = NRFX_PWM_INSTANCE(1);
 //static nrfx_pwm_t Green_PWM = NRFX_PWM_INSTANCE(1); // Use PWM 1
 //static nrfx_pwm_t Blue_PWM = NRFX_PWM_INSTANCE(2); // Use PWM 2
 
@@ -816,6 +862,19 @@ static nrf_pwm_sequence_t const m_RGB_seq =
     .repeats             = 0,
     .end_delay           = 0
 };
+
+
+static nrf_pwm_values_individual_t seq_fuel_values[] = {0x4000};
+
+static nrf_pwm_sequence_t const m_fuel_seq =
+{
+    .values.p_common    = seq_fuel_values,
+    .length              = NRF_PWM_VALUES_LENGTH(seq_fuel_values),
+    .repeats             = 0,
+    .end_delay           = 0
+};
+
+
 
 //static nrf_pwm_sequence_t const m_green_seq =
 //{
@@ -872,44 +931,32 @@ static void pwm_init()
 
 
 
-//    nrfx_pwm_config_t const config_B_pwm =
-//    {
-//        .output_pins =
-//        {
-//            
-//            NRFX_PWM_PIN_NOT_USED, // channel 1
-//            NRFX_PWM_PIN_NOT_USED, // channel 2
-//            BLUE_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
-//            NRFX_PWM_PIN_NOT_USED  // channel 3
-//        },
-//        .irq_priority = APP_IRQ_PRIORITY_LOW,
-//        .base_clock   = NRF_PWM_CLK_1MHz,
-//        .count_mode   = NRF_PWM_MODE_UP,
-//        .top_value    = PERIOD,
-//        .load_mode    = NRF_PWM_LOAD_COMMON,
-//        .step_mode    = NRF_PWM_STEP_AUTO
-//    };
-//
-//            nrfx_pwm_config_t const config_G_pwm =
-//    {
-//        .output_pins =
-//        {
-//            
-//            NRFX_PWM_PIN_NOT_USED, // channel 1
-//            GREEN_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
-//            NRFX_PWM_PIN_NOT_USED, // channel 2
-//            NRFX_PWM_PIN_NOT_USED  // channel 3
-//        },
-//        .irq_priority = APP_IRQ_PRIORITY_LOW,
-//        .base_clock   = NRF_PWM_CLK_1MHz,
-//        .count_mode   = NRF_PWM_MODE_UP,
-//        .top_value    = PERIOD,
-//        .load_mode    = NRF_PWM_LOAD_COMMON,
-//        .step_mode    = NRF_PWM_STEP_AUTO
-//    };
+        nrfx_pwm_config_t const config_fuel_pwm =
+    {
+        .output_pins =
+        {
+            FUEL_GAUGE_PIN | NRFX_PWM_PIN_INVERTED, // channel 0
+            NRFX_PWM_PIN_NOT_USED, // channel 1
+            NRFX_PWM_PIN_NOT_USED, // channel 2
+            NRFX_PWM_PIN_NOT_USED  // channel 3
+        },
+        .irq_priority = APP_IRQ_PRIORITY_HIGH,
+        .base_clock   = NRF_PWM_CLK_125kHz,
+        .count_mode   = NRF_PWM_MODE_UP,
+        .top_value    = 0xFFFF,
+        .load_mode    = NRF_PWM_LOAD_COMMON,
+        .step_mode    = NRF_PWM_STEP_AUTO
+    };
+
+
+
 
     ret_code = nrfx_pwm_init(&RGB_PWM, &config_RGB_pwm, NULL);
     APP_ERROR_CHECK(ret_code);
+    ret_code = nrfx_pwm_init(&FUEL_PWM, &config_fuel_pwm, NULL);
+    APP_ERROR_CHECK(ret_code);
+
+    nrfx_pwm_simple_playback(&FUEL_PWM, &m_fuel_seq, 1, NRFX_PWM_FLAG_LOOP);
 
 //    ret_code = nrfx_pwm_init(&Green_PWM, &config_G_pwm, NULL);
 //    APP_ERROR_CHECK(ret_code);
@@ -1065,6 +1112,7 @@ void System_Init(){
     if(fds_test_init() != NRF_SUCCESS){
       NRF_LOG_INFO("Failed to INIT");
     }
+    Pack_ID_init();
     //FLASH_init();
 }
 
@@ -1073,41 +1121,108 @@ int RGB_Bound_Error(char RGB){
 }
 //$CALEB use this for handling a packet message
 void Packet_Handle(char * Packet){
+    //P - 5B{3B - PACK ID, 2B show #} Program packid for show number
+    //I - 6B{2B - Show #, 1B set #, 3B RGB} program the 
+    //B - 1B{Set #}
+    //S - Save Current Show
+
+
     //P - Program Packet
     //S - Show Display Packet
     //D - Done Programming Packet (i.e. Save current show to flash)
-    //C - Clear Current Show
     
-    if(Packet[0] == 'P'){
-      //Packet[1] is the set number
-      //Packet[2] is R
-      //Packet[3] is G
-      //Packet[4] is B
-      if( !(RGB_Bound_Error(Packet[1]) || RGB_Bound_Error(Packet[2]) || RGB_Bound_Error(Packet[3]) || RGB_Bound_Error(Packet[4])) ){
-          current_show.sets[Packet[1]].R = Packet[2];
-          current_show.sets[Packet[1]].G = Packet[3];
-          current_show.sets[Packet[1]].B = Packet[4];
-      }
-    }else if(Packet[0] == 'S'){
-      if(!RGB_Bound_Error(Packet[1])){
-            Color_Change(current_show.sets[Packet[1]].R,current_show.sets[Packet[1]].G,current_show.sets[Packet[1]].B);
+    if(!(prev_message[0] == Packet[0] && prev_message[1] == Packet[1] && prev_message[2] == Packet[2] && prev_message[3] == Packet[3] && prev_message[4] == Packet[4] && prev_message[5] == Packet[5] && prev_message[6] == Packet[6])){
+      prev_message[0] = Packet[0];
+      prev_message[1] = Packet[1];
+      prev_message[2] = Packet[2];
+      prev_message[3] = Packet[3];
+      prev_message[4] = Packet[4];
+      prev_message[5] = Packet[5];
+      prev_message[6] = Packet[6];
+      NRF_LOG_INFO("Packet Receieved");
+      NRF_LOG_INFO("Packet(%c | %d | %d | %d | %d | %d )",Packet[0],Packet[1],Packet[2],Packet[3],Packet[4],Packet[5]);
+      NRF_LOG_INFO("Packet[6] = %d",Packet[6]);
+
+      if(Packet[0] == 'P'){
+        if( Packet[1] == PACK_ID[0] && Packet[2] == PACK_ID[1] && Packet[3] == PACK_ID[2] ){
+            Show_Num[0] = Packet[4];
+            Show_Num[1] = Packet[5];
+            clear_show();
+            //Color_Change(255,0,0);
+            NRF_LOG_INFO("P-Packet: PACKID Request : %x | %x | %x",Packet[1],Packet[2],Packet[3]);
+            NRF_LOG_INFO("P-Packet(Show Num[0] = %x, Show Num[1] = %x)",Packet[4],Packet[5]);
         }
-    } else if(Packet[0] == 'D'){
-      fds_test_write(current_show);
-    }
-    else if (Packet[0] == 'C'){
-      clear_show();
+      }else if(Packet[0] == 'B'){
+        if(!RGB_Bound_Error(Packet[1])){
+              NRF_LOG_INFO("B-Packet(Set %d: (R,G,B) == (%d,%d,%d))",Packet[1],current_show.sets[Packet[1]].R,current_show.sets[Packet[1]].G,current_show.sets[Packet[1]].B);
+              Color_Change(current_show.sets[Packet[1]].R,current_show.sets[Packet[1]].G,current_show.sets[Packet[1]].B);
+          }
+      } else if(Packet[0] == 'S'){
+        //NRF_LOG_INFO("Packet(%c | %d | %d | %d | %d| %d | %d)",Packet[0],Packet[1],Packet[2],Packet[3],Packet[4],Packet[5]);
+        fds_test_write(current_show);
+
+      } else if (Packet[0] == 'I'){ 
+        if(Packet[1] == Show_Num[0] && Packet[2] == Show_Num[1]){
+          if(!RGB_Bound_Error(Packet[3]) && !RGB_Bound_Error(Packet[4]) && !RGB_Bound_Error(Packet[5]) && !RGB_Bound_Error(Packet[6])){
+            current_show.sets[Packet[3]].R = Packet[4];
+            current_show.sets[Packet[3]].G = Packet[5];
+            current_show.sets[Packet[3]].B = Packet[6];
+          }
+        }
+      }
     }
 
 }
 
 void clear_show(){
-int i = 0;
-for(i = 0; i < 256; i++){
-        current_show.sets[i].R = 0;
-        current_show.sets[i].G = 0;
-        current_show.sets[i].B = 0;
-      }
+  int i = 0;
+  for(i = 0; i < 256; i++){
+          current_show.sets[i].R = 0;
+          current_show.sets[i].G = 0;
+          current_show.sets[i].B = 0;
+        }
+}
+
+uint32_t crc32_compute(uint8_t const * p_data, uint32_t size, uint32_t const * p_crc)
+{
+    uint32_t crc;
+
+    crc = (p_crc == NULL) ? 0xFFFFFFFF : ~(*p_crc);
+    for (uint32_t i = 0; i < size; i++)
+    {
+        crc = crc ^ p_data[i];
+        for (uint32_t j = 8; j > 0; j--)
+        {
+            crc = (crc >> 1) ^ (0xEDB88320U & ((crc & 1) ? 0xFFFFFFFF : 0));
+        }
+    }
+    return ~crc;
+}
+
+void Pack_ID_init(){
+    //Calculate PACK ID
+    ble_gap_addr_t ble_addr;
+    sd_ble_gap_addr_get(&ble_addr);
+    //NRF_LOG_INFO("MAC: %02X:%02X:%02X:%02X:%02X:%02X",ble_addr.addr[0],ble_addr.addr[1],ble_addr.addr[2],ble_addr.addr[3],ble_addr.addr[4],ble_addr.addr[5]);
+
+    uint32_t CRC1 = crc32_compute (ble_addr.addr,3,NULL) & 0xFFFFFF;
+    uint32_t CRC2 = crc32_compute (&ble_addr.addr[3],3,NULL) & 0xFFFFFF;
+
+    //NRF_LOG_INFO("HASH1:%x",CRC1);
+    //NRF_LOG_INFO("HASH2:%x",CRC2);
+
+    uint32_t CRC_C = CRC1 ^ CRC2;
+
+    //NRF_LOG_INFO("PACKID: %x",CRC_C);
+    PACK_ID[0] = (CRC_C & 0xFF);
+    PACK_ID[1] = (CRC_C & 0xFF00) >> 8;
+    PACK_ID[2] = (CRC_C & 0xFF0000) >> 16;
+
+
+
+    NRF_LOG_INFO("PACKID: %02x | %02x | %02x",PACK_ID[0], PACK_ID[1],PACK_ID[2]);
+
+
 }
 
 
@@ -1122,14 +1237,22 @@ int main(void)
     if(fds_read() == -1){
       clear_show();
       Color_Change(255,0,0);
+      nrf_delay_ms(100);
+      Color_Change(0,0,0);
       NRF_LOG_INFO("Failed to retrieve show");
     } else{
         Color_Change(0,255,0);
-        NRF_LOG_INFO("Retrieved show!");
+        nrf_delay_ms(100);
+        Color_Change(0,0,0);
+        NRF_LOG_INFO("Retrieved show yay!");
     }
 
     scan_start();
 
+
+
+
+    
 
     // Turn on the LED to signal scanning.
     //bsp_board_led_on(CENTRAL_SCANNING_LED);
